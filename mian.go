@@ -1,99 +1,77 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
-	"io"
-	"net/http"
+	"time"
 
-	"github.com/PuerkitoBio/goquery" // 用于CSS选择器支持
-	"golang.org/x/net/html/charset"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
-	"golang.org/x/text/transform"
+	"github.com/dszqbsm/crawler/collect"
+	"github.com/dszqbsm/crawler/engine"
+	"github.com/dszqbsm/crawler/log"
+	"github.com/dszqbsm/crawler/parse/doubangroup"
+	"go.uber.org/zap/zapcore"
 )
 
-// 正则表达式中[\s\S]*?是精髓，用于匹配任意字符串，*代表匹配0个或多个字符，?代表贪婪匹配，即找到第一个<a target="_blank"出现的未知就认定匹配成功，若不指定?则会找到最后一个<a target="_blank"
-// var headerRe = regexp.MustCompile(`<div class="index_[\s\S]*?<a target="_blank"[\s\S]*?alt="([\s\S]*?)"[\s\S]*?</a>`)
-
 func main() {
-	url := "https://www.thepaper.cn/"
-	body, err := Fetch(url)
-	if err != nil {
-		fmt.Printf("read content failed:%v", err)
-		return
+	// log
+	plugin := log.NewStdoutPlugin(zapcore.InfoLevel)
+	logger := log.NewLogger(plugin)
+	logger.Info("log init end")
+
+	// proxy
+	/* 	proxyURLs := []string{"http://127.0.0.1:8888", "http://127.0.0.1:8888"}
+	   	// 将代理服务器地址列表解析成url.URL切片，并返回轮询选择函数
+	   	p, err := proxy.RoundRobinProxySwitcher(proxyURLs...)
+	   	if err != nil {
+	   		logger.Error("RoundRobinProxySwitcher failed")
+	   	} */
+
+	// douban cookie
+	var seeds = make([]*collect.Request, 0, 1000)
+	for i := 0; i <= 100; i += 25 {
+		str := fmt.Sprintf("https://www.douban.com/group/szsh/discussion?start=%d", i)
+		seeds = append(seeds, &collect.Request{
+			Url:       str,
+			WaitTime:  1 * time.Second,
+			Cookie:    "bid=GT7j6PWkiMk; __utmz=30149280.1728978779.1.1.utmcsr=google|utmccn=(organic)|utmcmd=organic|utmctr=(not%20provided); viewed=\"1007305_27055717_10519268_36558411\"; _vwo_uuid_v2=D67C36ABC33CA10C09168D0521AD9DEA5|757429c706db3b67694302a45aec0c8c; _pk_id.100001.8cb4=e13fcef95dbf1252.1739513080.; _pk_ses.100001.8cb4=1; ap_v=0,6.0; __utma=30149280.212206049.1728978779.1738554951.1739513081.5; __utmc=30149280; __utmt=1; __yadk_uid=ZLSVCuyJ41KbJVbVBgV5zd3bnFyY9HhZ; douban-fav-remind=1; dbcl2=\"264055423:qy57Xf9rC78\"; ck=q-ZJ; push_noty_num=0; push_doumail_num=0; __utmv=30149280.26405; __utmb=30149280.126.7.1739513625676",
+			ParseFunc: doubangroup.ParseURL,
+		})
 	}
 
-	// 使用goquery库来解析HTML文档，doc表示整个HTML文档
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-	if err != nil {
-		fmt.Printf("read content failed:%v", err)
-		return
+	var f collect.Fetcher = &collect.BrowserFetch{
+		Timeout: 3000 * time.Millisecond,
+		Logger:  logger,
+		Proxy:   nil,
 	}
 
-	// 根据CSS标签选择器的语法查找匹配的标签，并遍历输出a标签中的文本
-	// Find方法用于查找匹配指定CSS选择器的元素，即选择属性以index_开头的div标签，^=是属性选择器，表示属性值以指定字符串开头
-	// a[target=_blank]选择target属性为_blank的a标签，img[alt]选择有alt属性的img标签
-	// each方法用于遍历所有匹配的元素，匿名函数的形式，s表示当前匹配的元素
-	doc.Find("div[class^='index_'] a[target=_blank] img[alt]").Each(func(i int, s *goquery.Selection) {
-		// 即获取当前img标签的alt属性值
-		title := s.AttrOr("alt", "")
-		fmt.Printf("Review %d: %s\n", i, title)
-	})
+	s := engine.NewSchedule(
+		engine.WithFetcher(f),
+		engine.WithLogger(logger),
+		engine.WithWorkCount(5),
+		engine.WithSeeds(seeds),
+	)
 
-	// 用于解析HTML文本
-	// doc, err := htmlquery.Parse(bytes.NewReader(body))
-
-	// 通过XPath语法查找符合条件的节点
-	// //表示选择文档中的任意位置，选择div标签，要求class属性包含index_字符，选择div标签下的a标签，选择a标签下的img标签，选择img标签下的alt属性并提取
-	// nodes := htmlquery.Find(doc, `//div[contains(@class, 'index_')]/a/img/@alt]`)
-	//fmt.Println(string(body))
-	/*
-		for _, node := range nodes {
-			fmt.Println("fetch card ", node.FirstChild.Data)
+	s.Run()
+	// 这里将广度优先思想在任务调度那里实现了，通过通道不断向队列中添加任务
+	/* 	for len(worklist) > 0 {
+		items := worklist
+		// 一个worklist就是一个结构体切片，这里表示将当前worklist清空，确保当前批次的任务被完全处理完再将新的任务添加到worklist中
+		worklist = nil
+		// 会进行两层广度优先，第一层爬取所有话题url，第二层过滤正文中包含阳台字样的话题url，通过解析函数的改变可以实现这样的功能替换
+		for _, item := range items {
+			body, err := f.Get(item)
+			time.Sleep(1 * time.Second)
+			if err != nil {
+				logger.Error("read content failed",
+					zap.Error(err),
+				)
+				continue
+			}
+			res := item.ParseFunc(body, item)
+			for _, item := range res.Items {
+				logger.Info("result",
+					zap.String("get url:", item.(string)))
+			}
+			worklist = append(worklist, res.Requesrts...)
 		}
-	*/
-	// 返回表达式的所有连续匹配的切片，是一个三维字节数组，第一层包含的是所有满足正则条件的字符串，第二层对每个满足条件的字符串做了分组，数组的第0号元素是<a>标签中的文字即新闻标题，第三层是字符串对应的字节数组
-	/*
-		matches := headerRe.FindAllSubmatch(body, -1)
-		for _, m := range matches {
-			fmt.Println("fetch card news:", string(m[1]))
-		}
-	*/
-}
-
-// 用于获取指定URL的HTML文本并转换为UTF-8编码方式
-func Fetch(url string) ([]byte, error) {
-
-	resp, err := http.Get(url)
-
-	if err != nil {
-		panic(err)
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("Error status code:%d", resp.StatusCode)
-	}
-	bodyReader := bufio.NewReader(resp.Body)
-	e := DeterminEncoding(bodyReader)
-	// 将HTML文本从特定编码转换为UTF-8编码
-	utf8Reader := transform.NewReader(bodyReader, e.NewDecoder())
-	return io.ReadAll(utf8Reader)
-}
-
-// 用于检测并返回当前HTML文本的编码格式
-func DeterminEncoding(r *bufio.Reader) encoding.Encoding {
-	// 当返回的HTML文本小于1024字节，则认为当前HTML文本有问题，直接返回默认的UTF-8编码
-	bytes, err := r.Peek(1024)
-
-	if err != nil {
-		fmt.Printf("fetch error:%v", err)
-		return unicode.UTF8
-	}
-	// 检测并返回对应HTML文本的编码
-	e, _, _ := charset.DetermineEncoding(bytes, "")
-	return e
+	} */
 }
