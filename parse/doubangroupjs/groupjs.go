@@ -1,4 +1,4 @@
-package doubangroup
+package doubangroupjs
 
 // 基于动态规则爬取豆瓣组内包含阳台关键字的页面
 

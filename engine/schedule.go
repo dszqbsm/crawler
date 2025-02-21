@@ -4,29 +4,34 @@ import (
 	"sync"
 
 	"github.com/dszqbsm/crawler/collect"
+	"github.com/dszqbsm/crawler/collector"
+	"github.com/dszqbsm/crawler/parse/doubanbook"
 	"github.com/dszqbsm/crawler/parse/doubangroup"
+	"github.com/dszqbsm/crawler/parse/doubangroupjs"
 	"github.com/robertkrimen/otto"
 	"go.uber.org/zap"
 )
 
+// 特殊函数，会在每个包被初始化时自动执行，用于初始化全局任务存储结构，添加普通爬虫任务，添加基于JavaScript的动态爬虫任务，添加豆瓣书任务
 func init() {
 	Store.Add(doubangroup.DoubangroupTask)
-	Store.AddJSTask(doubangroup.DoubangroupJSTask)
+	Store.Add(doubanbook.DoubanBookTask)
+	Store.AddJSTask(doubangroupjs.DoubangroupJSTask)
 }
 
 // 全局任务存储结构，用于动态添加爬虫任务
 type CrawlerStore struct {
 	list []*collect.Task          // 保存所有爬虫任务的列表
-	hash map[string]*collect.Task // 哈希表以任务名为键，用于快速查找任务
+	Hash map[string]*collect.Task // 哈希表以任务名为键，用于快速查找任务
 }
 
 // 添加普通的爬虫任务，将新的爬虫任务添加进哈希表和爬虫任务列表
 func (c *CrawlerStore) Add(task *collect.Task) {
-	c.hash[task.Name] = task
+	c.Hash[task.Name] = task
 	c.list = append(c.list, task)
 }
 
-// 添加基于JavaScript的动态爬虫任务
+// 添加基于JavaScript的动态爬虫任务，即将任务存到列表和哈希表，只是多了动态生成爬虫任务的种子网站以及爬虫任务的规则
 func (c *CrawlerStore) AddJSTask(m *collect.TaskModle) {
 	task := &collect.Task{
 		Property: m.Property,
@@ -73,12 +78,12 @@ func (c *CrawlerStore) AddJSTask(m *collect.TaskModle) {
 			task.Rule.Trunk = make(map[string]*collect.Rule, 0)
 		}
 		task.Rule.Trunk[r.Name] = &collect.Rule{
-			parseFunc,
+			ParseFunc: parseFunc,
 		}
 	}
 
 	// 将任务添加到任务存储结构中
-	c.hash[task.Name] = task
+	c.Hash[task.Name] = task
 	c.list = append(c.list, task)
 }
 
@@ -138,12 +143,14 @@ func (e *Crawler) Run() {
 	e.HandleResult()
 }
 
-// 启动爬虫的调度流程，初始化任务队列
+// 启动爬虫的调度流程，获取爬虫任务的种子网站的请求，并设置请求的任务为当前任务，并将请求发送到工作通道
 func (e *Crawler) Schedule() {
 	var reqs []*collect.Request
 	for _, seed := range e.Seeds { // 遍历初始任务
-		task := Store.hash[seed.Name]     // 获取任务实例
-		task.Fetcher = seed.Fetcher       // 设置采集器
+		task := Store.Hash[seed.Name] // 获取任务实例
+		task.Fetcher = seed.Fetcher   // 设置采集器
+		task.Storage = seed.Storage
+		task.Logger = e.Logger
 		rootreqs, err := task.Rule.Root() // 生成根请求
 		if err != nil {
 			e.Logger.Error("get root failed",
@@ -151,7 +158,7 @@ func (e *Crawler) Schedule() {
 			)
 			continue
 		}
-		for _, req := range rootreqs { // 将根请求添加到调度器中
+		for _, req := range rootreqs {
 			req.Task = task
 		}
 		reqs = append(reqs, rootreqs...)
@@ -160,10 +167,10 @@ func (e *Crawler) Schedule() {
 	go e.scheduler.Push(reqs...)
 }
 
-// 工作协程的核心逻辑，
+// 工作协程的核心逻辑，用于从通道中获取请求，发送请求并获取响应，并在获取规则后对响应进行解析，若结果集中包含子请求则将子请求发送到工作通道，最后将结果发送到结果处理通道
 func (s *Crawler) CreateWork() {
 	for {
-		req := s.scheduler.Pull()           // 从调度器中获取请求
+		req := s.scheduler.Pull()           // 从通道中获取请求
 		if err := req.Check(); err != nil { // 检查当前请求是否可用
 			s.Logger.Error("check failed",
 				zap.Error(err),
@@ -225,8 +232,13 @@ func (s *Crawler) HandleResult() {
 	for {
 		select {
 		case result := <-s.out:
-			for _, item := range result.Items {
-				// todo: store
+			for _, item := range result.Items { // 遍历结果集中的条目
+				switch d := item.(type) { // 做类型断言，若为*collector.DataCell类型，则调用任务的存储引擎保存数据
+				case *collector.DataCell:
+					name := d.GetTaskName()
+					task := Store.Hash[name]
+					task.Storage.Save(d)
+				}
 				s.Logger.Sugar().Info("get result: ", item)
 			}
 		}
@@ -252,9 +264,9 @@ func (e *Crawler) StoreVisited(reqs ...*collect.Request) {
 	}
 }
 
-// 用于处理失败的请求，通过加锁保证线程安全，如果请求允许重试，会将其重新推送到调度器中
+// 用于处理失败的请求，通过加锁保证线程安全，若该请求不允许重新加载则将请求从已访问记录中移除，如果请求允许重试，会将其重新发送到工作协程
 func (e *Crawler) SetFailure(req *collect.Request) {
-	if !req.Task.Reload {
+	if !req.Task.Reload { // 若不允许重新加载
 		e.VisitedLock.Lock()
 		unique := req.Unique()
 		delete(e.Visited, unique)
@@ -279,7 +291,9 @@ type Schedule struct {
 	Logger      *zap.Logger           // 日志器
 }
 
-// 将新的请求添加到任务队列中，循环将每个请求发送到requestCh通道
+// 新请求通道和工作通道发送和接收的都是请求，而不是任务，任务对于一个爬虫任务来说是固定的，是爬虫的固有属性，从而将处理请求和任务解耦
+
+// 将请求发送到新请求通道
 func (s *Schedule) Push(reqs ...*collect.Request) {
 	for _, req := range reqs {
 		s.requestCh <- req
@@ -297,7 +311,7 @@ func (s *Schedule) Output() *collect.Request {
 	return r
 }
 
-// 负责任务调度，维护两个队列，优先处理高优先级队列中的请求，当收到新请求时，根据请求的优先级将其添加到对应的队列中
+// 负责请求调度，维护两个队列，优先处理高优先级队列中的请求，当收到新请求时，根据请求的优先级将其添加到对应的队列中
 func (s *Schedule) Schedule() {
 	var req *collect.Request
 	var ch chan *collect.Request
@@ -330,7 +344,7 @@ func (s *Schedule) Schedule() {
 // 全局爬虫存储实例
 var Store = &CrawlerStore{
 	list: []*collect.Task{},
-	hash: map[string]*collect.Task{},
+	Hash: map[string]*collect.Task{},
 }
 
 // 为调度器提供了统一的接口规范，使得不同调度器实现都要遵循这些方法
@@ -362,4 +376,9 @@ func NewSchedule() *Schedule {
 	s.requestCh = requestCh
 	s.workerCh = workerCh
 	return s
+}
+
+// 根据任务名和规则名获取对应的字段列表
+func GetFields(taskName string, ruleName string) []string {
+	return Store.Hash[taskName].Rule.Trunk[ruleName].ItemFields
 }

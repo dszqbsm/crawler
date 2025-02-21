@@ -4,11 +4,12 @@ package collect
 
 //采集规则树
 type RuleTree struct {
-	Root  func() ([]*Request, error) // 根节点(执行入口)，用于生成爬虫的种子网站
+	Root  func() ([]*Request, error) // 根节点(执行入口)，用于生成爬虫的种子网站（如豆瓣话题不同页面，豆瓣书籍不同页面）
 	Trunk map[string]*Rule           // 规则哈希表存储当前任务所有规则
 }
 
 // 采集规则节点
 type Rule struct {
-	ParseFunc func(*Context) (ParseResult, error) // 内容解析函数
+	ItemFields []string                            // 用来表示当前输出数据的字段名
+	ParseFunc  func(*Context) (ParseResult, error) // 内容解析函数
 }

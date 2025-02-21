@@ -18,7 +18,7 @@ import (
 	"golang.org/x/text/transform"
 )
 
-// Fetcher接口用于统一不同爬取方式的实现
+// Fetcher接口用于统一不同采集器的实现
 type Fetcher interface {
 	Get(url *Request) ([]byte, error)
 }
