@@ -3,8 +3,6 @@ package doubangroupjs
 // 基于动态规则爬取豆瓣组内包含阳台关键字的页面
 
 import (
-	"time"
-
 	"github.com/dszqbsm/crawler/collect"
 )
 
@@ -12,7 +10,7 @@ import (
 var DoubangroupJSTask = &collect.TaskModle{
 	Property: collect.Property{
 		Name:     "js_find_douban_sun_room",
-		WaitTime: 1 * time.Second,
+		WaitTime: 2,
 		MaxDepth: 5,
 		Cookie:   "bid=GT7j6PWkiMk; __utmz=30149280.1728978779.1.1.utmcsr=google|utmccn=(organic)|utmcmd=organic|utmctr=(not%20provided); viewed=\"1007305_27055717_10519268_36558411\"; _vwo_uuid_v2=D67C36ABC33CA10C09168D0521AD9DEA5|757429c706db3b67694302a45aec0c8c; _pk_id.100001.8cb4=e13fcef95dbf1252.1739513080.; __yadk_uid=ZLSVCuyJ41KbJVbVBgV5zd3bnFyY9HhZ; douban-fav-remind=1; dbcl2=\"264055423:qy57Xf9rC78\"; push_noty_num=0; push_doumail_num=0; __utmv=30149280.26405; ck=q-ZJ; __utmc=30149280; _pk_ses.100001.8cb4=1; __utma=30149280.212206049.1728978779.1739853169.1740022125.13; __utmt=1; __utmb=30149280.7.5.1740022125",
 	},

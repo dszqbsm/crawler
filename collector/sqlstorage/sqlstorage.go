@@ -59,7 +59,9 @@ func (s *SqlStore) Save(dataCells ...*collector.DataCell) error {
 			s.Table[name] = struct{}{} // 在s.Table映射中添加一个键为name，值为空结构体示例的键值对，用于标记该列已经创建
 		}
 		if len(s.dataDocker) >= s.BatchCount { // 若数据单元数量达到批量处理数量，则调用Flush方法将数据插入数据库
-			s.Flush()
+			if err := s.Flush(); err != nil {
+				s.logger.Error("insert data failed", zap.Error(err))
+			}
 		}
 		s.dataDocker = append(s.dataDocker, cell)
 	}
@@ -71,6 +73,10 @@ func (s *SqlStore) Flush() error {
 	if len(s.dataDocker) == 0 {
 		return nil
 	}
+	// Flush函数会将s.dataDocker中的数据单元批量插入数据库，当数据插入完成后，清空s.dataDocker
+	defer func() {
+		s.dataDocker = nil
+	}()
 	args := make([]interface{}, 0)
 	for _, datacell := range s.dataDocker {
 		ruleName := datacell.Data["Rule"].(string)

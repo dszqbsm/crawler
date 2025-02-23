@@ -1,14 +1,17 @@
 package collect
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"math/rand"
 	"regexp"
 	"sync"
 	"time"
 
 	"github.com/dszqbsm/crawler/collector"
+	"github.com/dszqbsm/crawler/limiter"
 	"go.uber.org/zap"
 )
 
@@ -19,8 +22,9 @@ type Task struct {
 	VisitedLock sync.Mutex      // 用于保护Visited
 	Fetcher     Fetcher         // 负责发起HTTP请求的Fetcher实现
 	Storage     collector.Storage
-	Rule        RuleTree // 任务的解析规则
-	Logger      *zap.Logger
+	Rule        RuleTree            // 任务的解析规则
+	Logger      *zap.Logger         // 日志器
+	Limit       limiter.RateLimiter // 限速器
 }
 
 // 爬虫任务的属性
@@ -122,4 +126,16 @@ func (r *Request) Check() error {
 func (r *Request) Unique() string {
 	block := md5.Sum([]byte(r.Url + r.Method))
 	return hex.EncodeToString(block[:])
+}
+
+// 在工作协程发起请求之前，通过限速器限制请求速率，遍历多限速器的所有限速器，只有当所有限速器都满足的时候才能取得令牌，否则当前协程将会阻塞直到满足条件获取到令牌，并进行随机休眠
+func (r *Request) Fetch() ([]byte, error) {
+	// 在发起请求前，先检查是否达到了限速
+	if err := r.Task.Limit.Wait(context.Background()); err != nil {
+		return nil, err
+	}
+	// 随机休眠，模拟人类行为
+	sleeptime := rand.Int63n(int64(r.Task.WaitTime * 1000)) // 生成一个随机整数
+	time.Sleep(time.Duration(sleeptime) * time.Millisecond) // 让当前goroutine休眠随机的时间
+	return r.Task.Fetcher.Get(r)
 }

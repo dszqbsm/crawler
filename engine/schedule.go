@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"runtime/debug"
 	"sync"
 
 	"github.com/dszqbsm/crawler/collect"
@@ -150,6 +151,7 @@ func (e *Crawler) Schedule() {
 		task := Store.Hash[seed.Name] // 获取任务实例
 		task.Fetcher = seed.Fetcher   // 设置采集器
 		task.Storage = seed.Storage
+		task.Limit = seed.Limit
 		task.Logger = e.Logger
 		rootreqs, err := task.Rule.Root() // 生成根请求
 		if err != nil {
@@ -169,6 +171,14 @@ func (e *Crawler) Schedule() {
 
 // 工作协程的核心逻辑，用于从通道中获取请求，发送请求并获取响应，并在获取规则后对响应进行解析，若结果集中包含子请求则将子请求发送到工作通道，最后将结果发送到结果处理通道
 func (s *Crawler) CreateWork() {
+	// 使用defer和recover处理panic异常，防止程序崩溃
+	defer func() {
+		if err := recover(); err != nil {
+			s.Logger.Error("worker panic",
+				zap.Any("err", err),
+				zap.String("stack", string(debug.Stack())))
+		}
+	}()
 	for {
 		req := s.scheduler.Pull()           // 从通道中获取请求
 		if err := req.Check(); err != nil { // 检查当前请求是否可用
@@ -185,7 +195,7 @@ func (s *Crawler) CreateWork() {
 		}
 		s.StoreVisited(req)
 
-		body, err := req.Task.Fetcher.Get(req) // 发送请求并获取响应
+		body, err := req.Fetch() // 发送请求并获取响应
 		if err != nil {
 			s.Logger.Error("can't fetch ",
 				zap.Error(err),

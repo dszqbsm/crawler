@@ -5,15 +5,15 @@ package doubanbook
 import (
 	"regexp"
 	"strconv"
-	"time"
 
 	"github.com/dszqbsm/crawler/collect"
+	"go.uber.org/zap"
 )
 
 var DoubanBookTask = &collect.Task{
 	Property: collect.Property{
 		Name:     "douban_book_list",
-		WaitTime: 1 * time.Second,
+		WaitTime: 2,
 		MaxDepth: 5,
 		Cookie:   "bid=GT7j6PWkiMk; _pk_id.100001.3ac3=990ea61bddf62bb7.1727589184.; __yadk_uid=qrCDkWQlfaIvB03UawN9VuHC9GXXURbB; __utmz=30149280.1728978779.1.1.utmcsr=google|utmccn=(organic)|utmcmd=organic|utmctr=(not%20provided); __utmz=81379588.1728978779.1.1.utmcsr=google|utmccn=(organic)|utmcmd=organic|utmctr=(not%20provided); _vwo_uuid_v2=D67C36ABC33CA10C09168D0521AD9DEA5|757429c706db3b67694302a45aec0c8c; viewed=\"1007305_27055717_10519268_36558411\"; _vwo_uuid_v2=D67C36ABC33CA10C09168D0521AD9DEA5|757429c706db3b67694302a45aec0c8c; douban-fav-remind=1; dbcl2=\"264055423:qy57Xf9rC78\"; push_noty_num=0; push_doumail_num=0; __utmv=30149280.26405; ck=q-ZJ; __utmc=30149280; __utma=30149280.212206049.1728978779.1740022125.1740104072.14; __utmt=1; _pk_ref.100001.3ac3=%5B%22%22%2C%22%22%2C1740104076%2C%22https%3A%2F%2Fwww.google.com%2F%22%5D; _pk_ses.100001.3ac3=1; ap_v=0,6.0; __utmt_douban=1; __utmb=30149280.8.5.1740104072; __utma=81379588.1610336888.1728978779.1738554951.1740104076.5; __utmc=81379588; __utmb=81379588.1.10.1740104076",
 	},
@@ -67,8 +67,9 @@ func ParseTag(ctx *collect.Context) (collect.ParseResult, error) {
 				RuleName: "书籍列表",
 			})
 	}
+	zap.S().Debugln("parse book tag,count:", len(result.Requests))
 	// 在添加limit之前，临时减少抓取数量,防止被服务器封禁
-	result.Requests = result.Requests[:1]
+	// result.Requests = result.Requests[:1]
 	return result, nil
 }
 
@@ -81,6 +82,7 @@ func ParseBookList(ctx *collect.Context) (collect.ParseResult, error) {
 	result := collect.ParseResult{}
 	for _, m := range matches {
 		req := &collect.Request{
+			Priority: 100,
 			Method:   "GET",
 			Task:     ctx.Req.Task,
 			Url:      string(m[1]),
@@ -92,7 +94,8 @@ func ParseBookList(ctx *collect.Context) (collect.ParseResult, error) {
 		result.Requests = append(result.Requests, req)
 	}
 	// 在添加limit之前，临时减少抓取数量,防止被服务器封禁
-	result.Requests = result.Requests[:3]
+	// result.Requests = result.Requests[:3]
+	zap.S().Debugln("parse book list,count:", len(result.Requests))
 
 	return result, nil
 }
@@ -123,6 +126,7 @@ func ParseBookDetail(ctx *collect.Context) (collect.ParseResult, error) {
 	result := collect.ParseResult{
 		Items: []interface{}{data},
 	}
+	zap.S().Debugln("parse book detail", data)
 
 	return result, nil
 }
