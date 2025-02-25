@@ -1,0 +1,25 @@
+syntax = "proto3";                              // 版本号
+option go_package = "proto/greeter";            // 参数 1 表示生成go代码到哪个目录
+import "google/api/annotations.proto";          // 该依赖用于为grpc服务添加http映射，允许grpc服务能够暴露http接口
+
+// 定义了一个 gRPC 服务 Greeter 及其方法 Hello，以及请求和响应的消息类型。同时，使用注解将 Hello 方法映射到 HTTP POST 请求的 /greeter/hello 路径上
+
+// 对外暴露的rpc服务
+service Greeter {                               // 定义了一个名为Greeter的grpc服务
+    // 对外暴露的Hello方法，接收请求结构体，返回响应结构体
+	rpc Hello(Request) returns (Response) {     // 定义了服务中的一个rpc方法Hello
+	    option (google.api.http) = {            // 将Hello方法映射到http post请求的/greeter/hello路径上，即客户端可以通过http post请求调用这个grpc方法
+            post: "/greeter/hello"
+        };
+	}
+}
+
+// 请求结构体
+message Request {
+	string name = 1;
+}
+
+// 响应结构体
+message Response {
+	string greeting = 2;
+}
