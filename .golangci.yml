@@ -1,0 +1,63 @@
+# 用于配置golangci-lint工具的文件，golangci-lint用于对go语言进行静态代码分析
+# 用于设置golangci-lint运行时的一些全局选项
+run:
+    tests: false    #跳过测试文件，只检查生产文件
+    skip-dirs:      #跳过的文件夹
+        - vendor
+
+# 配置块，用于对特定的代码检查器进行详细的配置
+linters-settings:
+    # 检查函数的长度
+    funlen:
+        # Checks the number of lines in a function.
+        # If lower than 0, disable the check.
+        # Default: 60
+        lines: 120
+        # Checks the number of statements in a function.
+        # If lower than 0, disable the check.
+        # Default: 40
+        statements: -1  #标识禁用对函数语句数量的检查
+
+# list all linters by run `golangci-lint help linters`
+# 配置块，用于启用或禁用特定的代码检查器
+linters:
+    enable-all: true    #启用所有的代码检查器
+    disable:            #禁用的代码检查器
+        # gochecknoglobals: Checks that no globals are present in Go code
+        - gochecknoglobals
+        # gochecknoinits: Checks that no init functions are present in Go code
+        - gochecknoinits
+        # Checks that errors returned from external packages are wrapped
+        - wrapcheck
+        # checks that the length of a variable's name matches its scope
+        - varnamelen
+        # Checks the struct tags.
+        - tagliatelle
+        # An analyzer to detect magic numbers.
+        - gomnd
+        # Accept Interfaces, Return Concrete Types
+        - ireturn
+        # The owner seems to have abandoned the linter. Replaced by exhaustruct.
+        - exhaustivestruct
+        # Golang linter to check the errors handling expressions
+        - goerr113
+        # finds forced type assertions
+        - forcetypeassert
+        # Checks if all structure fields are initialized
+        - exhaustruct
+        # Reports long lines
+        - lll
+        # Inspects source code for security problems
+        - gosec
+        # Tool for detection of FIXME, TODO and other comment keywords
+        - godox
+        # Check if comments end in a period
+        - godot
+        # Finds slice declarations that could potentially be pre-allocated
+        - prealloc
+        # Gci controls golang package import order and makes it always deterministic.
+        - gci
+        # Gofumpt checks whether code was gofumpt-ed.
+        - gofumpt
+        # Provides diagnostics that check for bugs, performance and style issues.
+        - gocritic

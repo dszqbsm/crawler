@@ -1,4 +1,4 @@
-package collect
+package spider
 
 // Temp结构体为爬虫项目提供了一个灵活的临时数据存储和管理机制
 

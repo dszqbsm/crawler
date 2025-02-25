@@ -3,12 +3,12 @@ package doubangroupjs
 // 基于动态规则爬取豆瓣组内包含阳台关键字的页面
 
 import (
-	"github.com/dszqbsm/crawler/collect"
+	"github.com/dszqbsm/crawler/spider"
 )
 
 // 豆瓣组爬虫任务模板
-var DoubangroupJSTask = &collect.TaskModle{
-	Property: collect.Property{
+var DoubangroupJSTask = &spider.TaskModle{
+	Property: spider.Property{
 		Name:     "js_find_douban_sun_room",
 		WaitTime: 2,
 		MaxDepth: 5,
@@ -30,7 +30,7 @@ var DoubangroupJSTask = &collect.TaskModle{
 		AddJsReq(arr);
 			`,
 	// 初始化豆瓣组爬虫任务解析规则模板，包含两个解析规则
-	Rules: []collect.RuleModle{
+	Rules: []spider.RuleModle{
 		{
 			Name: "解析网站URL",
 			ParseFunc: `

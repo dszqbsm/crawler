@@ -1,6 +1,14 @@
 package main
 
 import (
+	"github.com/dszqbsm/crawler/cmd"
+)
+
+func main() {
+	cmd.Execute()
+}
+
+/* import (
 	"context"
 	"fmt"
 	"net/http"
@@ -125,4 +133,4 @@ func HandleHTTP() {
 	}
 	// 启动一个http服务器，监听8080端口，并将请求转发到mux
 	http.ListenAndServe(":8080", mux)
-}
+} */

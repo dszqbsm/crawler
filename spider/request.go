@@ -1,4 +1,4 @@
-package collect
+package spider
 
 import (
 	"context"
@@ -7,35 +7,8 @@ import (
 	"errors"
 	"math/rand"
 	"regexp"
-	"sync"
 	"time"
-
-	"github.com/dszqbsm/crawler/collector"
-	"github.com/dszqbsm/crawler/limiter"
-	"go.uber.org/zap"
 )
-
-// 爬虫任务
-type Task struct {
-	Property                    // 任务属性
-	Visited     map[string]bool // 用于记录已访问过的url
-	VisitedLock sync.Mutex      // 用于保护Visited
-	Fetcher     Fetcher         // 负责发起HTTP请求的Fetcher实现
-	Storage     collector.Storage
-	Rule        RuleTree            // 任务的解析规则
-	Logger      *zap.Logger         // 日志器
-	Limit       limiter.RateLimiter // 限速器
-}
-
-// 爬虫任务的属性
-type Property struct {
-	Name     string        `json:"name"`      // 任务名称，应保证唯一性
-	Url      string        `json:"url"`       // 任务的入口URL
-	Cookie   string        `json:"cookie"`    // 任务的Cookie
-	WaitTime time.Duration `json:"wait_time"` // 任务的等待时间
-	Reload   bool          `json:"reload"`    // 网站是否可以重复爬取
-	MaxDepth int           `json:"max_depth"` // 任务的最大深度
-}
 
 // 表示解析结果
 type ParseResult struct {
@@ -55,8 +28,10 @@ func (c *Context) GetRule(ruleName string) *Rule {
 }
 
 // 将解析到的data数据封装成一个DataCell对象，并添加一些额外的元信息
-func (c *Context) Output(data interface{}) *collector.DataCell {
-	res := &collector.DataCell{}
+func (c *Context) Output(data interface{}) *DataCell {
+	res := &DataCell{
+		Task: c.Req.Task,
+	}
 	res.Data = make(map[string]interface{})
 	res.Data["Task"] = c.Req.Task.Name
 	res.Data["Rule"] = c.Req.RuleName
@@ -90,8 +65,7 @@ func (c *Context) ParseJSReg(name string, reg string) ParseResult {
 // 筛选出符合条件的请求url
 func (c *Context) OutputJS(reg string) ParseResult {
 	re := regexp.MustCompile(reg)
-	ok := re.Match(c.Body)
-	if !ok {
+	if ok := re.Match(c.Body); !ok {
 		return ParseResult{
 			Items: []interface{}{},
 		}
@@ -104,7 +78,6 @@ func (c *Context) OutputJS(reg string) ParseResult {
 
 // 表示一个具体的HTTP请求
 type Request struct {
-	unique   string // 表示请求的唯一识别码，用于去重
 	Task     *Task  // 所属的任务
 	Url      string // 请求的URL
 	Method   string // 请求的方法，如GET、POST等

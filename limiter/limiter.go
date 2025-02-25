@@ -15,7 +15,7 @@ type RateLimiter interface {
 }
 
 // 将多个限速器按速率限制从小到大排序，然后返回一个多限速器实例
-func MultiLimiter(limiters ...RateLimiter) *multiLimiter {
+func Multi(limiters ...RateLimiter) *multiLimiter {
 	// 定义一个比较函数，byLimit用于比较两个限速器的速率限制
 	byLimit := func(i, j int) bool {
 		return limiters[i].Limit() < limiters[j].Limit()

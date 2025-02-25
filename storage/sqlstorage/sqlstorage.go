@@ -4,19 +4,19 @@ package sqlstorage
 
 import (
 	"encoding/json"
+	"errors"
 
-	"github.com/dszqbsm/crawler/collector"
 	"github.com/dszqbsm/crawler/engine"
+	"github.com/dszqbsm/crawler/spider"
 	"github.com/dszqbsm/crawler/sqldb"
 	"go.uber.org/zap"
 )
 
 type SqlStore struct {
-	dataDocker  []*collector.DataCell // 用于缓存待插入数据库的数据单元
-	columnNames []sqldb.Field         // 存储表的列名信息
-	db          sqldb.DBer            // 数据库操作接口
-	Table       map[string]struct{}   // 用于存储已创建的表名
-	options                           // 存储SqlStore的配置选项
+	dataDocker []*spider.DataCell  // 用于缓存待插入数据库的数据单元
+	db         sqldb.DBer          // 数据库操作接口
+	Table      map[string]struct{} // 用于存储已创建的表名
+	options                        // 存储SqlStore的配置选项
 }
 
 // SqlStore的构造函数，接受一系列配置选项，返回一个SqlStore实例
@@ -41,7 +41,7 @@ func New(opts ...Option) (*SqlStore, error) {
 }
 
 // 用于保存数据单元到SqlStore中
-func (s *SqlStore) Save(dataCells ...*collector.DataCell) error {
+func (s *SqlStore) Save(dataCells ...*spider.DataCell) error {
 	for _, cell := range dataCells { // 遍历传入的数据单元，检查对应的表是否已经创建，若表不存在则获取列名并创建表
 		name := cell.GetTableName()
 		if _, ok := s.Table[name]; !ok {
@@ -78,9 +78,17 @@ func (s *SqlStore) Flush() error {
 		s.dataDocker = nil
 	}()
 	args := make([]interface{}, 0)
+	var ruleName string
+	var taskName string
+	var ok bool
 	for _, datacell := range s.dataDocker {
-		ruleName := datacell.Data["Rule"].(string)
-		taskName := datacell.Data["Task"].(string)
+		if ruleName, ok = datacell.Data["Rule"].(string); !ok {
+			return errors.New("no rule field")
+		}
+
+		if taskName, ok = datacell.Data["Task"].(string); !ok {
+			return errors.New("no task field")
+		}
 		fields := engine.GetFields(taskName, ruleName)
 		data := datacell.Data["Data"].(map[string]interface{})
 		// 声明一个字符串切片并初始化，后续会把从datacell.Data中提取出来的数据元素添加到这个切片中，即value切片会存储每一条数据记录的各个字段值，最后添加到args切片中
@@ -101,7 +109,12 @@ func (s *SqlStore) Flush() error {
 				}
 			}
 		}
-		value = append(value, datacell.Data["Url"].(string), datacell.Data["Time"].(string))
+		if v, ok := datacell.Data["URL"].(string); ok {
+			value = append(value, v)
+		}
+		if v, ok := datacell.Data["Time"].(string); ok {
+			value = append(value, v)
+		}
 		for _, v := range value {
 			args = append(args, v)
 		}
@@ -116,7 +129,7 @@ func (s *SqlStore) Flush() error {
 }
 
 // 用于获取表的列名信息，从数据单元中获取任务名和规则名，然后获取字段列表并将每个字段转换为sqldb.Field结构体，并添加到columnNames切片中，最后再添加url和time字段
-func getFields(cell *collector.DataCell) []sqldb.Field {
+func getFields(cell *spider.DataCell) []sqldb.Field {
 	taskName := cell.Data["Task"].(string)
 	ruleName := cell.Data["Rule"].(string)
 	fields := engine.GetFields(taskName, ruleName)

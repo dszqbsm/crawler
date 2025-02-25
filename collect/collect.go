@@ -11,6 +11,7 @@ import (
 
 	"github.com/dszqbsm/crawler/extensions"
 	"github.com/dszqbsm/crawler/proxy"
+	"github.com/dszqbsm/crawler/spider"
 	"go.uber.org/zap"
 	"golang.org/x/net/html/charset"
 	"golang.org/x/text/encoding"
@@ -19,16 +20,15 @@ import (
 )
 
 // Fetcher接口用于统一不同采集器的实现
-type Fetcher interface {
+/* type Fetcher interface {
 	Get(url *Request) ([]byte, error)
-}
+} */
 
 // 基本的爬取
-type BaseFetch struct {
-}
+type BaseFetch struct{}
 
 // 实现Fetcher接口，基本的爬取：请求、读响应、检测编码、转utf-8编码，http.Get封装了创建client、创建NewRequest，调用Do方法的过程
-func (BaseFetch) Get(req *Request) ([]byte, error) {
+func (BaseFetch) Get(req *spider.Request) ([]byte, error) {
 	resp, err := http.Get(req.Url)
 
 	if err != nil {
@@ -39,8 +39,7 @@ func (BaseFetch) Get(req *Request) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("Error status code:%d\n", resp.StatusCode)
-		return nil, err
+		return nil, fmt.Errorf("error status code:%d", resp.StatusCode)
 	}
 	bodyReader := bufio.NewReader(resp.Body)
 	e := DeterminEncoding(bodyReader)
@@ -57,7 +56,7 @@ type BrowserFetch struct {
 
 // 实现Fetcher接口，模拟浏览器爬取：为了设置HTTP请求头，不能再简单使用http.Get方法，需要创建http.Client，并通过http.NewRequest创建一个请求，并调用req.Header.Set设置User-Agent头，调用client.Do完成http请求
 // 创建http.Client，http.NewRequest创建一个请求，req.Header.Set设置User-Agent头，client.Do完成http请求，读响应，检测编码，转utf-8
-func (b BrowserFetch) Get(request *Request) ([]byte, error) {
+func (b BrowserFetch) Get(request *spider.Request) ([]byte, error) {
 	client := &http.Client{
 		Timeout: b.Timeout,
 	}
@@ -82,14 +81,18 @@ func (b BrowserFetch) Get(request *Request) ([]byte, error) {
 
 	resp, err := client.Do(req)
 
-	time.Sleep(request.Task.WaitTime)
-
 	if err != nil {
+		return nil, err
+	}
+
+	// time.Sleep(request.Task.WaitTime)
+
+	/* 	if err != nil {
 		b.Logger.Error("fetch failed",
 			zap.Error(err),
 		)
 		return nil, err
-	}
+	} */
 
 	bodyReader := bufio.NewReader(resp.Body)
 	e := DeterminEncoding(bodyReader)
@@ -103,7 +106,8 @@ func DeterminEncoding(r *bufio.Reader) encoding.Encoding {
 	bytes, err := r.Peek(1024)
 
 	if err != nil {
-		fmt.Printf("fetch error:%v\n", err)
+		zap.L().Error("fetch failed", zap.Error(err))
+
 		return unicode.UTF8
 	}
 

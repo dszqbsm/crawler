@@ -58,6 +58,21 @@ func (d *Sqldb) CreateTable(t TableData) error {
 	return err
 }
 
+// 定义了删除表的方法，根据TableData中的数据删除数据库表
+func (d *Sqldb) DropTable(t TableData) error {
+	if len(t.ColumnNames) == 0 {
+		return errors.New("column can not be empty")
+	}
+
+	sql := `DROP TABLE ` + t.TableName
+
+	d.logger.Debug("drop table", zap.String("sql", sql))
+
+	_, err := d.db.Exec(sql)
+
+	return err
+}
+
 // 定义了插入数据的方法，构造插入语句并执行插入操作，形如INSERT INTO users(id,name,age) VALUES (?,?,?),(?,?,?);，多少个问号取决于有多少列
 func (d *Sqldb) Insert(t TableData) error {
 	if len(t.ColumnNames) == 0 {
@@ -76,11 +91,6 @@ func (d *Sqldb) Insert(t TableData) error {
 	d.logger.Debug("insert table", zap.String("sql", sql))
 	_, err := d.db.Exec(sql, t.Args...)
 	return err
-}
-
-// 创建并返回一个新的sqldb，用于初始化数据库操作对象
-func newSqldb() *Sqldb {
-	return &Sqldb{}
 }
 
 // 表示数据库表中的一个字段，包含字段名和字段类型

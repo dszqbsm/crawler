@@ -1,7 +1,8 @@
-package collector
+package spider
 
 // 数据单元
 type DataCell struct {
+	Task *Task
 	Data map[string]interface{} // 键为字符串类型，值为任意类型的映射
 }
 

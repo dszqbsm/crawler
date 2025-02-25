@@ -1,4 +1,4 @@
-package collect
+package spider
 
 // 专门处理需要JavaScript支持的解析场景
 

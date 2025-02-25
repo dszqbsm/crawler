@@ -1,4 +1,4 @@
-package collect
+package spider
 
 // 用于存放通用的解析规则和逻辑，适用于一般网页内容解析，不依赖特定的JavaScript执行环境
 
