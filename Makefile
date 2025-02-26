@@ -33,3 +33,16 @@ build:
 # 由make lint命令调用
 lint:
 	golangci-lint run ./...
+
+# imports目标，使用goimports自动整理go源文件中的导入语句按标准顺序对导入包进行排序，删除未使用的导入包，添加缺失的导入包，-w表示直接将修改写入源文件中
+# 由make imports命令调用
+imports:
+	goimports -w .
+
+# cover目标
+# 第一个语句表示对当前目录及其子目录下的所有go测试文件进行测试，-v输出详细测试结果，-short跳过耗时较长的测试用例，最后一个参数表示将测试覆盖率信息保存道指定路径文件中
+# 第二个语句使用go tool cover工具读取测试覆盖率信息文件并输出每个函数的测试覆盖率信息
+# 由make cover命令调用
+cover:
+	go test ./... -v -short -coverprofile .coverage.txt		
+	go tool cover -func .coverage.txt

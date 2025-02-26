@@ -14,6 +14,7 @@ require (
 	github.com/antchfx/xpath v1.3.3 // indirect
 	github.com/asim/go-micro/cmd/protoc-gen-micro/v4 v4.0.0 // indirect
 	github.com/bitly/go-simplejson v0.5.0 // indirect
+	github.com/bwmarrin/snowflake v0.3.0 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect

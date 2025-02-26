@@ -139,12 +139,12 @@ type Crawler struct {
 }
 
 // 启动爬虫，开启调度协程、创建多个工作携程，并调用结果处理方法处理解析结果
-func (e *Crawler) Run() {
-	go e.Schedule()
-	for i := 0; i < e.WorkCount; i++ {
-		go e.CreateWork()
+func (c *Crawler) Run() {
+	go c.Schedule()
+	for i := 0; i < c.WorkCount; i++ {
+		go c.CreateWork()
 	}
-	e.HandleResult()
+	c.HandleResult()
 }
 
 // 启动爬虫的调度流程，获取爬虫任务的种子网站的请求，并设置请求的任务为当前任务，并将请求发送到工作通道
@@ -272,7 +272,7 @@ func (c *Crawler) CreateWork() {
 
 // 处理解析结果的方法，从out通道接收解析结果，遍历输出结果
 func (c *Crawler) HandleResult() {
-	for {
+	/* 	for {
 		select {
 		case result := <-c.out:
 			for _, item := range result.Items { // 遍历结果集中的条目
@@ -281,12 +281,21 @@ func (c *Crawler) HandleResult() {
 					if err := d.Task.Storage.Save(d); err != nil {
 						c.Logger.Error("")
 					}
-					/* 					name := d.GetTaskName()
-					   					task := Store.Hash[name]
-					   					task.Storage.Save(d) */
 				}
 				c.Logger.Sugar().Info("get result: ", item)
 			}
+		}
+	} */
+	// for ... range语句是专门用于从通道接收数据的语法糖，并且会在通道关闭时自动退出循环，无序额外的错误处理
+	for result := range c.out {
+		for _, item := range result.Items {
+			switch d := item.(type) {
+			case *spider.DataCell:
+				if err := d.Task.Storage.Save(d); err != nil {
+					c.Logger.Error("")
+				}
+			}
+			c.Logger.Sugar().Info("get result: ", item)
 		}
 	}
 }

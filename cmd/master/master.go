@@ -5,12 +5,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dszqbsm/crawler/cmd/worker"
 	"github.com/dszqbsm/crawler/log"
+	"github.com/dszqbsm/crawler/master"
 	"github.com/dszqbsm/crawler/proto/greeter"
+	"github.com/dszqbsm/crawler/spider"
 	"github.com/go-micro/plugins/v4/config/encoder/toml"
 	"github.com/go-micro/plugins/v4/registry/etcd"
 	"github.com/go-micro/plugins/v4/server/grpc"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/spf13/cobra"
 	"go-micro.dev/v4"
 	"go-micro.dev/v4/client"
 	"go-micro.dev/v4/config"
@@ -28,6 +32,33 @@ import (
 
 // master.go文件实现了一个基于grpc和http代理的服务端程序，主要功能包括加载配置、初始化日志、启动HTTP代理服务器和grpc服务器，提供了一个简单的Greeter服务
 
+var MasterCmd = &cobra.Command{
+	Use:   "master",
+	Short: "run master service.",
+	Long:  "run master service.",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		Run()
+	},
+}
+
+// init函数会在包被初始化时（包的初始化是在程序启动时自动进行的，即当一个包被导入时，go会先初始化该包，如A导入包B，则B会被先初始化，再初始化包A）自动执行，不需要手动调用，用于执行必要的初始化操作，初始化包级变量
+// 在init函数中为mastercmd命令添加了三个命令行标志，允许用户在启动master服务时指定不同的配置项，如masterID、HTTPListenAddress和GRPCListenAddress，默认是1、8081、9091
+func init() {
+	MasterCmd.Flags().StringVar(
+		&masterID, "id", "1", "set master id")
+	MasterCmd.Flags().StringVar(
+		&HTTPListenAddress, "http", ":8081", "set HTTP listen address")
+
+	MasterCmd.Flags().StringVar(
+		&GRPCListenAddress, "grpc", ":9091", "set GRPC listen address")
+}
+
+// 全局变量，用于存储从命令行标志获取的值
+var masterID string
+var HTTPListenAddress string
+var GRPCListenAddress string
+
 func Run() {
 	var (
 		err    error
@@ -38,6 +69,7 @@ func Run() {
 	enc := toml.NewEncoder()                                                                 // 创建一个toml编码器，用于编码和解码toml格式的数据
 	cfg, err := config.NewConfig(config.WithReader(json.NewReader(reader.WithEncoder(enc)))) // 创建一个配置实例cfg，并指定使用json读取器和toml编码器
 	err = cfg.Load(file.NewSource(                                                           // 调用Load方法从config.toml文件中加载配置信息
+		file.WithPath("config.toml"),
 		source.WithEncoder(enc),
 	))
 
@@ -62,37 +94,55 @@ func Run() {
 	// Server
 	var sconfig ServerConfig
 	if err := cfg.Get("MasterServer").Scan(&sconfig); err != nil { // 从配置中获取MasterServer配置项，并将其扫描到sconfig变量中
-		logger.Error("get MasterServer config failed", zap.Error(err))
 		logger.Error("get GRPC Server config failed", zap.Error(err))
 	}
 	logger.Sugar().Debugf("grpc server config,%+v", sconfig)
+
+	reg := etcd.NewRegistry(registry.Addrs(sconfig.RegistryAddress)) // 创建一个基于etcd的服务注册中心实例，并指定etcd的地址
+
+	// 初始化任务
+	var tcfg []spider.TaskConfig
+	if err := cfg.Get("Tasks").Scan(&tcfg); err != nil {
+		logger.Error("init seed tasks", zap.Error(err))
+	}
+	seeds := worker.ParseTaskConfig(logger, nil, nil, tcfg)
+
+	// 创建master实例，初始化服务环境
+	master.New(
+		masterID,
+		master.WithLogger(logger.Named("master")),
+		master.WithGRPCAddress(GRPCListenAddress),
+		master.WithregistryURL(sconfig.RegistryAddress),
+		master.WithRegistry(reg),
+		master.WithSeeds(seeds),
+	)
 
 	// 启动HTTP代理服务器，将HTTP请求转发到grpc服务器
 	go RunHTTPServer(sconfig)
 
 	// 启动grpc服务器
-	RunGRPCServer(logger, sconfig)
+	RunGRPCServer(logger, reg, sconfig)
 }
 
 type ServerConfig struct {
-	GRPCListenAddress string // grpc服务器监听地址
-	HTTPListenAddress string // http代理服务器监听地址
-	ID                string // 服务器ID
-	RegistryAddress   string // 注册中心地址
-	RegisterTTL       int    // 注册中心注册TTL
-	RegisterInterval  int    // 注册中心注册间隔
-	Name              string // 服务名称
-	ClientTimeOut     int    // 客户端超时时间
+	// GRPCListenAddress string // grpc服务器监听地址
+	// HTTPListenAddress string // http代理服务器监听地址
+	// ID                string // 服务器ID
+	RegistryAddress  string // 注册中心地址
+	RegisterTTL      int    // 注册中心注册TTL
+	RegisterInterval int    // 注册中心注册间隔
+	Name             string // 服务名称
+	ClientTimeOut    int    // 客户端超时时间
 }
 
 // 启动grpc服务器
-func RunGRPCServer(logger *zap.Logger, cfg ServerConfig) {
-	reg := etcd.NewRegistry(registry.Addrs(cfg.RegistryAddress)) // 创建一个etcd注册中心并指定注册中心地址
-	service := micro.NewService(                                 // 创建一个微服务实例，并配置服务器、监听地址、注册中心、注册时间间隔、日志包装器、服务名称等参数
+func RunGRPCServer(logger *zap.Logger, reg registry.Registry, cfg ServerConfig) {
+	// reg := etcd.NewRegistry(registry.Addrs(cfg.RegistryAddress)) // 创建一个etcd注册中心并指定注册中心地址
+	service := micro.NewService( // 创建一个微服务实例，并配置服务器、监听地址、注册中心、注册时间间隔、日志包装器、服务名称等参数
 		micro.Server(grpc.NewServer(
-			server.Id(cfg.ID),
+			server.Id(masterID),
 		)),
-		micro.Address(cfg.GRPCListenAddress),
+		micro.Address(GRPCListenAddress),
 		micro.Registry(reg),
 		micro.RegisterTTL(time.Duration(cfg.RegisterTTL)*time.Second),
 		micro.RegisterInterval(time.Duration(cfg.RegisterInterval)*time.Second),
@@ -105,7 +155,7 @@ func RunGRPCServer(logger *zap.Logger, cfg ServerConfig) {
 		logger.Sugar().Error("micro client init error. ", zap.String("error:", err.Error()))
 		return
 	}
-	// 初始化微服务
+	// 初始化微服务，会将服务注册到注册中心，并能启动后台协程维护心跳
 	service.Init()
 
 	// 调用RegisterGreeterHandler函数，将Greeter服务注册到微服务中
@@ -139,12 +189,12 @@ func RunHTTPServer(cfg ServerConfig) {
 	}
 
 	// 将Greeter服务的grpc网关注册到http多路复用器mux上，指定grpc服务器的地址
-	if err := greeter.RegisterGreeterGwFromEndpoint(ctx, mux, cfg.GRPCListenAddress, opts); err != nil {
-		zap.L().Fatal("Register backend grpc server endpoint failed")
+	if err := greeter.RegisterGreeterGwFromEndpoint(ctx, mux, GRPCListenAddress, opts); err != nil {
+		zap.L().Fatal("Register backend grpc server endpoint failed", zap.Error(err))
 	}
-	zap.S().Debugf("start master http server listening on %v proxy to grpc server;%v", cfg.HTTPListenAddress, cfg.GRPCListenAddress)
-	if err := http.ListenAndServe(cfg.HTTPListenAddress, mux); err != nil {
-		zap.L().Fatal("http listenAndServe failed")
+	zap.S().Debugf("start master http server listening on %v proxy to grpc server;%v", HTTPListenAddress, GRPCListenAddress)
+	if err := http.ListenAndServe(HTTPListenAddress, mux); err != nil {
+		zap.L().Fatal("http listenAndServe failed", zap.Error(err))
 	}
 }
 

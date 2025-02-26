@@ -13,7 +13,7 @@ import (
 // 用户执行make build构建程序后，执行./main version命令时，会执行versionCmd.Run()函数，打印版本信息；此外执行./main -h还能看到Cobra自动生成的帮助文档
 
 // worker子命令
-var workerCmd = &cobra.Command{
+/* var workerCmd = &cobra.Command{
 	Use: "worker",
 	// 提供命令的简短活详细描述
 	Short: "run worker service.",
@@ -22,9 +22,9 @@ var workerCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) { // 定义命令执行时的逻辑，调用worker.Run()函数启动工作节点服务
 		worker.Run()
 	},
-}
+} */
 
-var masterCmd = &cobra.Command{
+/* var masterCmd = &cobra.Command{
 	Use:   "master",
 	Short: "run master service.",
 	Long:  "run master service.",
@@ -32,7 +32,7 @@ var masterCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		master.Run()
 	},
-}
+} */
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
@@ -46,6 +46,6 @@ var versionCmd = &cobra.Command{
 
 func Execute() {
 	var rootCmd = &cobra.Command{Use: "crawler"} // 仅用于组织和挂载子命令
-	rootCmd.AddCommand(masterCmd, workerCmd, versionCmd)
+	rootCmd.AddCommand(master.MasterCmd, worker.WorkerCmd, versionCmd)
 	rootCmd.Execute()
 }
