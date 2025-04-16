@@ -81,19 +81,17 @@ Master开发，由于worker和master有许多可以公用的代码，因此将wo
 通过Makefile将常用的开发任务，如编译、代码检查等，封装成目标，避免了手动输入大量命令的繁琐过程，此外Makefile可以根据文件的修改时间和依赖关系，在修改代码后只编译那些变化的文件，避免要重新编译整个项目，编译的目的是将项目源代码编译成可执行文件，并注入版本信息，方便版本管理和问题排查
 master和worker节点都是微服务，都暴露了grpc和http服务，master暴露的服务主要供worker调用，用于任务分配、状态同步等操作，而worker暴露的服务可以供多个对象调用，这样master节点能够实时掌握整个集群的工作进度，合理的进行任务调度和资源分配
 
-master高可用的实现，借助etcd实现分布式服务选主和故障容错：为了故障恢复，保障服务连续性
+master高可用的实现，借助etcd实现分布式服务选主：为了故障恢复，保障服务连续性
 对于分布式服务，只有一个master可以成为leader，只有leader能够分配任务、处理外部访问，当leader崩溃时，其他master将竞争上岗成为新的leader，实现master的高可用
 当第1个master服务上线时，即执行`go run main.go master --id=1 --http=:8081 --grpc=:9091`时首先会调用cmd下的master.go程序，从config.toml中读取数据，构建master实例，并启动当前master实例的grpc服务和http服务，构建master实例时，还会执行master下的master.go程序，初始化etcd客户端用于服务选主，从注册中心获取所有worker节点，将种子资源（也即是初始任务）添加到当前master服务中，由其进行任务分配，最后开启协程持续进行领导者选举，开启协程持续进行消息处理
 在领导者选举中，基于etcd客户端的能力进行服务选主，由于当前只有一个master，因此该master服务成为主master服务，并开始监听领导者变化信息和worker节点变化信息，在有新worker节点上线、更新或下线时，通过通道传递变更信息，及时更新master维护的worker节点列表，实现worker节点服务发现
 当第2个master服务上线时，同样会构建master实例，启动grpc服务和http服务，尝试通过etcd的选举机制加入选举，底层是竞争同一个key（如/resource/election）此时由于第1个master已经是领导者，第2个master不会竞选成功，并且会每隔20秒检查一下leader状态防止脑裂现象，但也能监听领导者变化信息和监听worker节点变化信息，但只有leader才能处理资源分配和任务调度（为什么只有leader才能处理资源分配和任务调度，代码中如何体现？）
-当leader节点宕机时
+当leader节点宕机时？
 当上线一个worker服务时，如何注册到注册中心？——在初始化微服务的时候会自动将服务注册到注册中心
 还有其他分布式协调组件，如zookeeper、consul等，为什么选择etcd？
 关于选主、服务发现有很多问题可以讨论的？
 go-micro、etcd、相关插件等，他们之间的关系是什么？
 etcd选主原理：Campaign用了一个事务操作在要抢占的e.keyPrefix路径下维护一个Key，事务操作会首先判断当前生成的Key（如/resources/election/xxxxx）是否在etcd中，只有当结果为否的时候才会创建该Key，这样每个master都会在/resources/election/下维护一个Key，并且当前的Key是带租约的，然后Campaign会调用waitDeletes函数阻塞等待，直到自己成为leader。waitDeletes函数会调用client.Get获取当前争抢的/resources/election/路径下具有最大版本号的Key，并调用waitDeletes函数等待该Key被删除，而waitDeletes会调用client.Watch来完成对特定版本Key的监听。即当前master需要监听这个最大版本号Key的删除事件，如果这个特定的Key被删除，就意味着没有比当前Master创建的Key更早的Key了，因此当前的master理所当然成为leader，这种方式还避免了惊群效应，当leader崩溃后，并不会唤醒所有在选举中的master，只有队列中的前一个master创建的Key被删除，当前的master才会被唤醒，即所有的master都在排队等待前一个master退出，从而master以最小的代价实现了对Key的抢占
-
-
 
 master任务调度的实现，借助micro提供的registry实现master服务发现（即master需要感知worker节点的注册与销毁）和worker节点信息维护、master资源管理：为了自动感知节点上下限，自动剔除不可用节点
 在master和worker启动时，会调用service.Init()和service.Run()，go-micro会自动将服务注册到etcd，并维护心跳，确保服务在线状态；
@@ -103,5 +101,115 @@ master资源管理把爬虫任务当作一种资源，在初始化时，程序�
 应该先启动worker节点，再启动master节点，否则会由于没有对应的worker节点而添加master节点失败
 
 
+故障容错：在worker崩溃时重新调度
+
+完善核心能力：master请求转发与worker资源管理
+
+服务治理：限流、熔断器、认证与鉴权
+当worker节点批量请求master时，grpc协议保障高效通信，当master响应延迟上升时，熔断机制阻止worker继续发送请求，服务端限流保证master核心业务不受影响
+
+
+
+
+
+
+
+一些认知：
+yaml文件是一种数据序列化语言，专为配置文件设计，用于定义集群资源对象，是Kubernetes能理解的部署说明书
+toml文件是应用程序实际读取的配置文件格式
+yaml和toml结合使用，实现职责分离，yaml管理资源部署，用于Kubernetes层，toml用于管理业务参数，用于应用层
+yaml是Kubernetes中定义资源对象的主要配置文件格式，用于声明式地描述集群中的各种资源，Kubernetes通过解析yaml文件来创建和管理这些资源，yaml通过缩进层级结构阻止配置信息，具有apiVersion（指定Kubernetes API版本）、kind（定义资源类型）、metadata（包含名称、标签等元数据）、spec（详细描述资源的具体规格）等关键字段
+
+整体流程：
+
+
+
+
+服务注册、服务选主、服务发现、资源管理（master和worker）、故障容错、服务治理、服务容器化、多容器部署、Kubernetes集群
+
+故障容错功能，即在worker崩溃时重新调度
+master资源调度时机：master成为leader（leader切换不常见，要全量更新当前worker节点状态与资源）、worker节点发生变化、客户端调用master api进行资源增删改查
+1、master成为leader时
+首先全量加载当前worker节点，再全量加载当前的爬虫资源，遍历资源，若有资源还没有被分配到节点，则尝试将资源分配到worker节点中，若资源都已经分配给对应的worker节点，则遍历查看当前节点是否存货，若当前节点已经不存在，则将该资源分配给其他节点
+
+
+组件功能：
+1. go-micro.dev/v4/registry是go-micro框架的服务注册发现模块，主要实现了服务注册、服务发现、状态监听等功能，在项目中，worker节点在启动时会
+
+
+
+
+
+
+
+
+
+
+**梳理思路：**
+1. 关于故障容错功能
+明确master进行资源调度的时机有三中情况，对于第一种情况，当master成为leader时，会调用BecomeLeader方法，在该方法中，会调用updateWorkNodes方法（）加载全量worker节点，再调用loadResource方法（）加载全量资源（资源代表什么意思？），最后调用reAssign方法（）重新分配资源并原子设置master为leader状态。那么在updateWorkNodes方法中是如何加载全量worker节点的，首先会调用registry（registry在项目中有什么作用）的GetService方法（）从注册中心查询所有worker服务节点（这里一个服务节点具体代表什么，为什么是遍历services[0]中的所有结点？）
+
+资源代表什么？————到加载资源loadResource方法中看，通过调用etcd客户端（etcd客户端在项目中有什么作用）的Get方法从etcd中获取所有资源信息（etcd资源存储形式，存储到内存还是怎么，是持久存储还是缓存？），资源在etcd中存储形式如下几个字段，并通过RESOURCEPATH=/resources进行逻辑分区和数据路由，进而可以根据路径找到不同类型的资源，资源在etcd中以json编码形式存在，取出后要进行json反序列化，ResourceSpec结构体专门用于存储资源，而master结构体也有一个资源列表字段，用于存储不同的资源（Name有啥含义，为什么要把worker2和IP配在一起，这个IP是什么ip）（资源是在什么时候存储的）（为什么会有addResources和AddResource，这两个添加资源的方法有什么区别），要先理解清楚grpc和proto才能理解里面整个的通信逻辑，那么先集中花时间把手写rpc项目搞定，再回来看代码，可能有不同的理解
+```json
+{
+  "ID": "1525512679494094849", 
+  "Name": "test.site",
+  "AssignedNode": "worker2|192.168.1.11:8080",
+  "CreationTime": 1718000001123456789
+}
+```
+addResources方法和AddResource方法的区别，前者是内部方法（面向存储），后者是外部方法（面向业务）（谁进行调用？），AddResource方法用于处理单个资源请求，首先会
+
+registry在项目中有什么作用？————这是go-micro框架的服务注册发现模块，主要实现了服务注册即worker结点启动时注册自身元数据（不是注册到etcd中吗？）、服务发现即master结点通过GetService方法获取可用worker列表、状态监听即通过Watch方法实时感知Worker上下线（这些功能具体都是怎么实现的？）
+
+
+爬虫资源指什么
+
+
+2. grpc+protobuf
+protobuf是一种结构化数据存储格式，性能效率优于json、xml，以二进制存储占用空间小可读性差
+grpc是远程过程调用系统，可以实现微服务间通信，默认使用protobuf协议进行rpc调用
+
+
+
+
+
+
+本次更新做了什么：实现故障容错、完善核心能力，进一步抽象封装优化代码逻辑
+
+问题：
+为什么在cmd/master.go中不定义Greeter结构体及其Hello方法？
+资源在etcd进行持久化存储和在内存中进行缓存，如何解决双写一致性问题？
+代码其实有很多可以优化的地方，是否要优化？————要发现这些问题，但不改代码调试了，只要会回答即可，能够自圆其说
+服务注册、服务选主、服务发现、资源管理（master和worker）、故障容错、服务治理、服务容器化、多容器部署、Kubernetes集群
+
+
+
+简历按使用了什么技术，实现了什么功能，解决了什么问题/提升了多少性能
+
 待做：
 需要对整个流程画图加强理解
+总结项目使用到的结构体与方法，梳理项目整体架构，阅读剩下的书本内容
+对每个代码片段都这样问：当前代码实现中，使用了什么技术，实现了什么功能，解决了什么问题，存在哪些技术难点，又是如何解决的​
+将项目整个都发给deepseek帮忙总结形成简历
+
+
+我将把我做的项目的全部代码文件发给你，这个项目是一个高性能、分布式爬虫项目，该项目包含以下目录结构：根目录下包含auth目录、cmd目录、extensions目录、generator目录、kubernetes目录、limiter目录、log目录、master目录、proto目录、proxy目录、spider目录、sqlstorage目录、tasklib目录、version目录、以及.golangci.yml文件、config.toml文件、docker-compose.yml文件、Dockerfile文件、Makefile文件、main.go文件，其中auth目录包含auth.go代码文件，cmd目录下包含master目录和worker目录以及cmd.go代码文件，cmd目录下的master目录中包含master.go代码文件，cmd目录下的worker目录中包含worker.go代码文件，extensions目录包含randomua.go代码文件，generator目录包含generator.go代码文件，kubernetes目录包含configmap.yaml、crawl-master-service.yaml、crawl-master.yaml、crawl-worker-service.yaml、crawl-worker.yaml、ingress.yaml代码文件，limiter目录包含limiter.go代码文件，log目录包含default.go、file_test.go、log.go代码文件，master目录包含master.go、option.go代码文件，proto目录包含crawler目录和greeter目录，crawler目录包含crawler.proto、crawler_grpc.pb.go、crawler.pb.go、crawler.pb.gw.go、crawler.pb.micro.go代码文件，greeter目录包含hello.proto、hello_grpc.pb.go、hello.pb.go、hello.pb.gw.go、hello.pb.micro.go代码文件，proxy目录包含proxy.go、proxy_test.go代码文件，spider目录包含workerengine目录、context.go、datarepository.go、fetchservice.go、request.go、requestrepository.go、resource.go、resourceregistry.go、resourcerepository.go、rule.go、task.go、taskstore.go、temp.go代码文件，workerengine目录包含option.go、scheduleservice.go、workerservice.go代码文件，sqlstorage目录包含sqldb目录、option.go、sqlstorage_test.go、sqlstorage.go代码文件，sqldb目录包含option.go、sqldb_test.go、sqldb.go代码文件，tasklib目录包含doubanbook目录、doubangroup目录、doubangroupjs目录、tasklib.go代码文件，doubanbook目录包含book.go代码文件，doubangroup目录包含group.go代码文件，doubangourpjs目录包含groupjs.go代码文件，version目录包含version.go代码文件
+
+现在我准备写一份求职岗位为golang开发工程师的简历，准备将这个爬虫项目作为一个项目经历写进简历中，你会怎么写，请给出项目描述和个人职责（即使用什么技术实现了什么功能解决了什么问题）以及技术难点（使用什么技术/方法解决了什么业务难点），你要严格根据项目代码实现来给出内容，不能自己胡编乱造
+
+repository存储库的意思
+
+
+
+
+
+
+
+
+
+
+多关注技术选型：为什么用这家而不是另外的
+
+
+

@@ -29,6 +29,9 @@ endif
 build:
 	go build -ldflags '$(LDFLAGS)' $(BUILD_FLAGS) main.go
 
+debug:
+	go build -gcflags=all="-N -l" -ldflags '$(LDFLAGS)' $(BUILD_FLAGS) main.go
+
 # lint目标，用于运行 golangci-lint 工具对项目代码进行静态分析，确保代码符合一定的规范和质量标准
 # 由make lint命令调用
 lint:

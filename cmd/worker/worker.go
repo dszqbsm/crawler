@@ -2,17 +2,19 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
-	"github.com/dszqbsm/crawler/collect"
-	"github.com/dszqbsm/crawler/engine"
+	"github.com/dszqbsm/crawler/generator"
 	"github.com/dszqbsm/crawler/limiter"
 	"github.com/dszqbsm/crawler/log"
 	"github.com/dszqbsm/crawler/proto/greeter"
 	"github.com/dszqbsm/crawler/proxy"
 	"github.com/dszqbsm/crawler/spider"
-	"github.com/dszqbsm/crawler/storage/sqlstorage"
+	engine "github.com/dszqbsm/crawler/spider/workerengine"
+	sqlstorage "github.com/dszqbsm/crawler/sqlstorage"
 	"github.com/go-micro/plugins/v4/config/encoder/toml"
 	"github.com/go-micro/plugins/v4/registry/etcd"
 	"github.com/go-micro/plugins/v4/server/grpc"
@@ -48,10 +50,15 @@ var WorkerCmd = &cobra.Command{
 
 func init() {
 	WorkerCmd.Flags().StringVar(
-		&workerID, "id", "1", "set master id")
+		&workerID, "id", "", "set worker id")
+	WorkerCmd.Flags().StringVar(
+		&podIP, "podip", "", "set worker id")
 	WorkerCmd.Flags().StringVar(
 		&HTTPListenAddress, "http", ":8080", "set HTTP listen address")
-
+	WorkerCmd.Flags().StringVar(
+		&PProfListenAddress, "pprof", ":9981", "set pprof address")
+	WorkerCmd.Flags().BoolVar(
+		&cluster, "cluster", true, "run mode")
 	WorkerCmd.Flags().StringVar(
 		&GRPCListenAddress, "grpc", ":9090", "set GRPC listen address")
 }
@@ -59,17 +66,40 @@ func init() {
 var workerID string
 var HTTPListenAddress string
 var GRPCListenAddress string
+var cluster bool
+var PProfListenAddress string
+var podIP string
 
+/*
+无输入，无输出
+
+该函数作为worker服务的入口，用于启动worker服务，主要包括以下步骤：
+
+1、启动性能分析端点
+
+2、加载toml配置文件，初始化日志器、采集器、存储器等组件，从配置文件中读取解析配置，初始化任务列表，生成workerid
+
+4、创建爬虫引擎，配置采集器、日志器、worker节点数量、任务列表、调度器、数据存储器、workerid、请求历史存储器、资源存储器、资源注册器（etcd）
+
+5、启动爬虫引擎、启动HTTP服务器、启动GRPC服务器
+*/
 func Run() {
+	// 用于启动性能分析端点
+	go func() {
+		if err := http.ListenAndServe(PProfListenAddress, nil); err != nil {
+			panic(err)
+		}
+	}()
 	var (
 		err     error
 		logger  *zap.Logger
 		p       proxy.ProxyFunc
-		storage spider.Storage
+		storage spider.DataRepository
 	)
 
 	// 通过toml加载配置
-	enc := toml.NewEncoder()                                                                 // 创建一个toml编码器，用于编码和解码toml格式的数据
+	enc := toml.NewEncoder() // 创建一个toml编码器，用于编码和解码toml格式的数据
+	// cfg字段存储了toml文件中的所有配置
 	cfg, err := config.NewConfig(config.WithReader(json.NewReader(reader.WithEncoder(enc)))) // 创建一个配置实例cfg，并指定使用json读取器和toml编码器
 	err = cfg.Load(file.NewSource(                                                           // 调用Load方法从config.toml文件中加载配置信息
 		file.WithPath("config.toml"),
@@ -100,11 +130,7 @@ func Run() {
 	if p, err = proxy.RoundRobinProxySwitcher(proxyURLs...); err != nil {
 		logger.Error("RoundRobinProxySwitcher failed", zap.Error(err))
 	}
-	var f spider.Fetcher = &collect.BrowserFetch{
-		Timeout: time.Duration(timeout) * time.Millisecond,
-		Logger:  logger,
-		Proxy:   p,
-	}
+	f := spider.NewFetchService(spider.BrowserFetchType)
 
 	// 存储器配置
 	sqlURL := cfg.Get("storage", "sqlURL").String("")
@@ -114,7 +140,7 @@ func Run() {
 		sqlstorage.WithBatchCount(2),
 	); err != nil {
 		logger.Error("create sqlstorage failed", zap.Error(err))
-		return
+		panic(err)
 	}
 
 	// 初始化任务
@@ -123,25 +149,53 @@ func Run() {
 		logger.Error("init seed tasks", zap.Error(err))
 	}
 	// 解析任务配置
-	seeds := ParseTaskConfig(logger, f, storage, tcfg)
-
-	// 初始化爬虫引擎环境
-	_ = engine.NewEngine(
-		engine.WithFetcher(f),
-		engine.WithLogger(logger),
-		engine.WithWorkCount(5),
-		engine.WithSeeds(seeds),
-		engine.WithScheduler(engine.NewSchedule()),
-	)
-
-	// 启动worker节点
-	// go s.Run()
+	seeds := ParseTaskConfig(logger, p, f, storage, tcfg)
 
 	var sconfig ServerConfig
 	if err := cfg.Get("GRPCServer").Scan(&sconfig); err != nil {
 		logger.Error("get GRPC Server config failed", zap.Error(err))
 	}
 	logger.Sugar().Debugf("grpc server config,%+v", sconfig)
+
+	// 生成workerid的优先级逻辑，在k8s环境下使用容器ip生成id，非容器化环境使用时间戳生成id
+	if workerID == "" {
+		if podIP != "" {
+			ip := generator.IDbyIP(podIP)
+			workerID = strconv.Itoa(int(ip))
+		} else {
+			workerID = fmt.Sprintf("%d", time.Now().UnixNano())
+		}
+	}
+
+	id := sconfig.Name + "-" + workerID
+	zap.S().Debug("worker id:", id)
+
+	reg, err := spider.NewEtcdRegistry([]string{sconfig.RegistryAddress})
+	if err != nil {
+		logger.Error("init EtcdRegistry failed", zap.Error(err))
+	}
+
+	s, err := engine.NewWorkerService(
+		engine.WithFetcher(f),
+		engine.WithLogger(logger),
+		engine.WithWorkCount(5),
+		engine.WithSeeds(seeds),
+		// 实现服务发现，worker节点自动注册到etcd，从而master可动态发现所有worker
+		//engine.WithregistryURL(sconfig.RegistryAddress),
+		engine.WithScheduler(engine.NewSchedule()),
+		// 实现数据持久化
+		engine.WithStorage(storage),
+		engine.WithID(id),
+		engine.WithReqRepository(spider.NewReqHistoryRepository()),
+		engine.WithResourceRepository(spider.NewResourceRepository()),
+		engine.WithResourceRegistry(reg),
+	)
+
+	if err != nil {
+		logger.Error("create worker service failed", zap.Error(err))
+	}
+
+	go s.Run(cluster)
 
 	// 启动HTTP代理服务器，将HTTP请求转发到grpc服务器
 	go RunHTTPServer(sconfig)
@@ -151,9 +205,6 @@ func Run() {
 }
 
 type ServerConfig struct {
-	// GRPCListenAddress string
-	// HTTPListenAddress string
-	// ID                string
 	RegistryAddress  string
 	RegisterTTL      int
 	RegisterInterval int
@@ -201,6 +252,17 @@ func (g *Greeter) Hello(ctx context.Context, req *greeter.Request, rsp *greeter.
 	return nil
 }
 
+/*
+输入一个ServerConfig结构体，无输出
+
+该函数主要用于实现一个HTTP反向代理服务器，将HTTP请求转换为gRPC请求，实现REST ful API和gRPC服务的双向通信
+
+1、初始化一个gRPC-Gateway的请求路由器mux，用于将HTTP请求路径映射到gRPC方法
+
+2、创建grpc连接选项，基于请求路由器，指定gRPC服务器地址，将master的gRPC服务注册到请求路由器中，实现HTTP和gRPC的互通
+
+3、启动HTTP服务开启监听，将HTTP请求转发到gRPC服务器，实现HTTP和gRPC的互通
+*/
 func RunHTTPServer(cfg ServerConfig) {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
@@ -221,6 +283,7 @@ func RunHTTPServer(cfg ServerConfig) {
 	}
 }
 
+// 用于包装grpc服务器的处理程序，实现日志记录功能，即在处理grpc请求时记录请求信息和响应信息
 func logWrapper(log *zap.Logger) server.HandlerWrapper {
 	return func(fn server.HandlerFunc) server.HandlerFunc {
 		return func(ctx context.Context, req server.Request, rsp interface{}) error {
@@ -238,10 +301,26 @@ func logWrapper(log *zap.Logger) server.HandlerWrapper {
 	}
 }
 
-// 将配置文件中的任务配置解析为可执行的任务实例，为每个任务设置必要的属性，最终返回任务切片，包含了所有的任务
-func ParseTaskConfig(logger *zap.Logger, f spider.Fetcher, s spider.Storage, cfgs []spider.TaskConfig) []*spider.Task {
+// 将配置文件中的任务配置解析为任务配置结构体，为每个任务设置必要的属性，最终返回任务切片，包含了所有的任务
+/*
+输入一个日志器、代理服务器、采集器、存储器、任务配置切片，输出一个任务切片
+
+该函数用于解析任务配置，将配置解析为爬虫任务列表
+
+1、初始化一个空的任务切片tasks
+
+2、遍历任务配置切片，为每个任务创建一个新的任务实例t，并设置任务的名称、是否允许重新加载、cookie、日志器、存储器、代理服务器等属性
+
+3、根据任务配置中的等待时间和最大深度设置任务的等待时间和最大深度属性
+
+4、如果任务配置中包含限速器配置，则为任务创建一个限速器，并将其设置为任务的限速器属性
+
+5、将任务的采集器设置为输入的采集器
+
+6、将任务添加到任务切片tasks中
+*/
+func ParseTaskConfig(logger *zap.Logger, p proxy.ProxyFunc, f spider.Fetcher, s spider.DataRepository, cfgs []spider.TaskConfig) []*spider.Task {
 	tasks := make([]*spider.Task, 0, 1000)
-	// 对于每一个任务都创建一个爬虫实例
 	for _, cfg := range cfgs {
 		t := spider.NewTask(
 			spider.WithName(cfg.Name),
@@ -249,6 +328,7 @@ func ParseTaskConfig(logger *zap.Logger, f spider.Fetcher, s spider.Storage, cfg
 			spider.WithCookie(cfg.Cookie),
 			spider.WithLogger(logger),
 			spider.WithStorage(s),
+			spider.WithProxy(p),
 		)
 
 		if cfg.WaitTime > 0 {
@@ -262,7 +342,6 @@ func ParseTaskConfig(logger *zap.Logger, f spider.Fetcher, s spider.Storage, cfg
 		var limits []limiter.RateLimiter
 		if len(cfg.Limits) > 0 {
 			for _, lcfg := range cfg.Limits {
-				// speed limiter
 				l := rate.NewLimiter(limiter.Per(lcfg.EventCount, time.Duration(lcfg.EventDur)*time.Second), 1)
 				limits = append(limits, l)
 			}
@@ -270,10 +349,7 @@ func ParseTaskConfig(logger *zap.Logger, f spider.Fetcher, s spider.Storage, cfg
 			t.Limit = multiLimiter
 		}
 
-		switch cfg.Fetcher {
-		case "browser":
-			t.Fetcher = f
-		}
+		t.Fetcher = f
 		tasks = append(tasks, t)
 	}
 	return tasks

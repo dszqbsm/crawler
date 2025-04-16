@@ -240,33 +240,33 @@ var osStrings = []string{
 	"X11; Linux x86_64",
 }
 
-// Generates Firefox Browser User-Agent (Desktop)
-//
-//	-> "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:87.0) Gecko/20100101 Firefox/87.0"
-//
-// 生成桌面浏览器用户代理的函数：随机选择一个 Firefox 版本号和操作系统字符串，然后根据固定的格式生成一个 Firefox 浏览器的用户代理字符串
+/*
+输出一个随机的火狐浏览器User-Agent；
+
+从预设的火狐版本号和操作系统字符串中随机选择一个，然后根据固定的格式生成一个火狐浏览器的User-Agent字符串
+*/
 func genFirefoxUA() string {
 	version := ffVersions[rand.Intn(len(ffVersions))]
 	os := osStrings[rand.Intn(len(osStrings))]
 	return fmt.Sprintf("Mozilla/5.0 (%s; rv:%.1f) Gecko/20100101 Firefox/%.1f", os, version, version)
 }
 
-// Generates Chrome Browser User-Agent (Desktop)
-//
-//	-> "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.72 Safari/537.36"
-//
-// 生成桌面浏览器用户代理的函数：随机选择一个 Chrome 版本号和操作系统字符串，然后根据固定的格式生成一个 Chrome 浏览器的用户代理字符串
+/*
+输出一个随机的Chrome浏览器User-Agent；
+
+从预设的Chrome版本号和操作系统字符串中随机选择一个，然后根据固定的格式生成一个Chrome浏览器的User-Agent字符串
+*/
 func genChromeUA() string {
 	version := chromeVersions[rand.Intn(len(chromeVersions))]
 	os := osStrings[rand.Intn(len(osStrings))]
 	return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, version)
 }
 
-// Generates Microsoft Edge User-Agent (Desktop)
-//
-//	-> "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.72 Safari/537.36 Edg/90.0.818.39"
-//
-// 生成桌面浏览器用户代理的函数：随机选择一个 Edge 版本号和操作系统字符串，然后根据固定的格式生成一个 Edge 浏览器的用户代理字符串
+/*
+输出一个随机的Edge浏览器User-Agent；
+
+从预设的Edge版本号和操作系统字符串中随机选择一个，然后根据固定的格式生成一个Edge浏览器的User-Agent字符串
+*/
 func genEdgeUA() string {
 	version := edgeVersions[rand.Intn(len(edgeVersions))]
 	chromeVersion := strings.Split(version, ",")[0]
@@ -275,22 +275,22 @@ func genEdgeUA() string {
 	return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36 Edg/%s", os, chromeVersion, edgeVersion)
 }
 
-// Generates Opera Browser User-Agent (Desktop)
-//
-//	-> "Opera/9.80 (X11; Linux x86_64; U; en) Presto/2.8.131 Version/11.11"
-//
-// 生成桌面浏览器用户代理的函数：随机选择一个 Opera 版本号和操作系统字符串，然后根据固定的格式生成一个 Opera 浏览器的用户代理字符串
+/*
+输出一个随机的Opera浏览器User-Agent；
+
+从预设的Opera版本号和操作系统字符串中随机选择一个，然后根据固定的格式生成一个Opera浏览器的User-Agent字符串
+*/
 func genOperaUA() string {
 	version := operaVersions[rand.Intn(len(operaVersions))]
 	os := osStrings[rand.Intn(len(osStrings))]
 	return fmt.Sprintf("Opera/9.80 (%s; U; en) Presto/%s", os, version)
 }
 
-// Generates UCWEB/Nokia203 Browser User-Agent (Mobile)
-//
-//	-> "UCWEB/2.0 (Java; U; MIDP-2.0; Nokia203/20.37) U2/1.0.0 UCMini/10.9.8.1006 (SpeedMode; Proxy; Android 4.4.4; SM-J110H ) U2/1.0.0 Mobile"
-//
-// 生成移动设备浏览器用户代理的函数：随机选择一个 UCWEB 设备、版本号和 Android 版本号，然后根据固定的格式生成一个 UCWEB 浏览器的用户代理字符串
+/*
+输出一个随机的移动UCWEB浏览器User-Agent；
+
+从预设的UCWEB设备、版本号和Android版本号中随机选择一个，然后根据固定的格式生成一个移动UCWEB浏览器的User-Agent字符串
+*/
 func genMobileUcwebUA() string {
 	device := ucwebDevices[rand.Intn(len(ucwebDevices))]
 	version := ucwebVersions[rand.Intn(len(ucwebVersions))]
@@ -298,11 +298,11 @@ func genMobileUcwebUA() string {
 	return fmt.Sprintf("UCWEB/2.0 (Java; U; MIDP-2.0; Nokia203/20.37) U2/1.0.0 UCMini/%s (SpeedMode; Proxy; Android %s; %s ) U2/1.0.0 Mobile", version, android, device)
 }
 
-// Generates Nexus 10 Browser User-Agent (Mobile)
-//
-//	-> "Mozilla/5.0 (Linux; Android 5.1.1; Nexus 10 Build/LMY48T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.91 Safari/537.36"
-//
-// 生成移动设备浏览器用户代理的函数：随机选择一个 Nexus 10 设备、版本号和 Android 版本号，然后根据固定的格式生成一个 Nexus 10 浏览器的用户代理字符串
+/*
+输出一个随机的移动Nexus 10浏览器User-Agent；
+
+从预设的Nexus 10设备、版本号和Android版本号中随机选择一个，然后根据固定的格式生成一个移动Nexus 10浏览器的User-Agent字符串
+*/
 func genMobileNexus10UA() string {
 	build := nexus10Builds[rand.Intn(len(nexus10Builds))]
 	android := androidVersions[rand.Intn(len(androidVersions))]

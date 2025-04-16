@@ -10,11 +10,25 @@ import (
 
 // 限速器接口，统一了不同限速器的行为
 type RateLimiter interface {
-	Wait(context.Context) error // 该方法会阻塞调用者，知道可以继续执行时间，或上下文被取消
-	Limit() rate.Limit          // 返回限速器的速率限制
+	/*
+	   输入一个上下文，返回一个错误
+
+	   遍历所有限速器，调用每个限速器的Wait方法，阻塞等待获取所有限速器的令牌，如果任何一个限速器返回错误，则返回错误，若获取到所有限速器的令牌，则返回nil
+	*/
+	Wait(context.Context) error // 该方法会阻塞调用者，直到可以继续执行时间，或上下文被取消
+	/*
+	   无输入，输出一个速率限制
+
+	   返回第一个限速器的速率限制，因为限速器列表已经按速率限制从小到大排序，所以第一个限速器的速率限制就是所有限速器中最小的速率限制
+	*/
+	Limit() rate.Limit // 返回限速器的速率限制
 }
 
-// 将多个限速器按速率限制从小到大排序，然后返回一个多限速器实例
+/*
+输入多个限速器，输出一个多限速器实例
+
+将限速器按速率限制从小到大排序，然后返回一个多限速器示例
+*/
 func Multi(limiters ...RateLimiter) *multiLimiter {
 	// 定义一个比较函数，byLimit用于比较两个限速器的速率限制
 	byLimit := func(i, j int) bool {
@@ -31,9 +45,12 @@ type multiLimiter struct {
 	limiters []RateLimiter
 }
 
-// 用于等待可用的令牌，若没有可用的令牌，当前协程会陷入阻塞状态，直到有可用的令牌或上下文被取消
+/*
+输入一个上下文，返回一个错误
+
+遍历所有限速器，调用每个限速器的Wait方法，阻塞等待获取所有限速器的令牌，如果任何一个限速器返回错误，则返回错误，若获取到所有限速器的令牌，则返回nil
+*/
 func (l *multiLimiter) Wait(ctx context.Context) error {
-	// 遍历所有限速器，调用每个限速器的Wait方法，如果任何一个限速器返回错误，则返回错误，若所有限速器都允许执行，则返回nil
 	for _, l := range l.limiters {
 		if err := l.Wait(ctx); err != nil {
 			return err
@@ -42,12 +59,20 @@ func (l *multiLimiter) Wait(ctx context.Context) error {
 	return nil
 }
 
-// 返回第一个限速器的速率限制
+/*
+无输入，输出一个速率限制
+
+返回第一个限速器的速率限制，因为限速器列表已经按速率限制从小到大排序，所以第一个限速器的速率限制就是所有限速器中最小的速率限制
+*/
 func (l *multiLimiter) Limit() rate.Limit {
 	return l.limiters[0].Limit()
 }
 
-// Every函数用于指定两个令牌之间的时间间隔
+/*
+输入两个参数：eventCount：表示在指定的时间间隔内需要生成的令牌数量，duration：表示时间间隔的长度，返回一个速率限制
+
+计算并返回在指定的时间间隔内生成指定数量的令牌的速率限制
+*/
 func Per(eventCount int, duration time.Duration) rate.Limit {
 	return rate.Every(duration / time.Duration(eventCount))
 }

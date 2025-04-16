@@ -17,9 +17,9 @@ sqlURL = "root:123456@tcp(127.0.0.1:3326)/crawler?charset=utf8"
 
 # worker节点配置
 [GRPCServer]
-# HTTPListenAddress = ":8080"
-# GRPCListenAddress = ":9090"
-# ID = "1"
+HTTPListenAddress = ":8080"
+GRPCListenAddress = ":9090"
+ID = "1"
 RegistryAddress = ":2379"
 RegisterTTL = 60
 RegisterInterval = 15
@@ -28,9 +28,6 @@ Name = "go.micro.server.worker"
 
 # master节点配置
 [MasterServer]
-# HTTPListenAddress = ":8081"
-# GRPCListenAddress = ":9091"
-# ID = "1"
 RegistryAddress = ":2379"
 RegisterTTL = 60
 RegisterInterval = 15
